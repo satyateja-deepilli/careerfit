@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import mammoth from "mammoth";
 
 // ─── PROMPTS ────────────────────────────────────────────────────────────────
 
@@ -197,6 +198,8 @@ export default function App() {
   const [tailoredResume, setTailoredResume] = useState("");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [resumeFileName, setResumeFileName] = useState("");
+  const [resumeDragOver, setResumeDragOver] = useState(false);
 
   const chatEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -265,6 +268,103 @@ export default function App() {
 
   const copy = () => { navigator.clipboard.writeText(tailoredResume); setCopied(true); setTimeout(() => setCopied(false), 2000); };
 
+  const processDocxFile = async (file) => {
+    if (!file || !file.name.endsWith(".docx")) {
+      setError("Please upload a .docx file."); return;
+    }
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const result = await mammoth.extractRawText({ arrayBuffer });
+      setResume(result.value.trim());
+      setResumeFileName(file.name);
+      setError("");
+    } catch (e) {
+      setError(`Failed to read Word file — ${e.message}`);
+    }
+  };
+
+  const downloadAsWord = async () => {
+    const { Document, Packer, Paragraph, TextRun, AlignmentType, BorderStyle, UnderlineType } = await import("docx");
+
+    const SECTION_HEADERS = ["PROFESSIONAL SUMMARY", "SUMMARY", "OBJECTIVE", "EXPERIENCE",
+      "WORK EXPERIENCE", "SKILLS", "TECHNICAL SKILLS", "EDUCATION", "CERTIFICATIONS",
+      "PROJECTS", "ACHIEVEMENTS", "AWARDS", "PUBLICATIONS", "VOLUNTEER", "LANGUAGES", "INTERESTS"];
+
+    const isSectionHeader = (line) => {
+      const t = line.trim();
+      const up = t.toUpperCase();
+      return SECTION_HEADERS.some(h => up === h || up === h + ":" || up.startsWith(h + " ")) ||
+        (t === up && t.length > 2 && t.length < 50 && !/[@|•\-\d(]/.test(t));
+    };
+
+    const lines = tailoredResume.split("\n");
+    const children = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const trimmed = lines[i].trim();
+
+      if (i === 0 && trimmed) {
+        // Name — large, centred, bold
+        children.push(new Paragraph({
+          alignment: AlignmentType.CENTER,
+          spacing: { after: 60 },
+          children: [new TextRun({ text: trimmed, bold: true, size: 36, font: "Calibri" })]
+        }));
+        continue;
+      }
+
+      if (i === 1 && trimmed && (trimmed.includes("@") || trimmed.includes("|") || trimmed.toLowerCase().includes("linkedin"))) {
+        // Contact line
+        children.push(new Paragraph({
+          alignment: AlignmentType.CENTER,
+          spacing: { after: 240 },
+          children: [new TextRun({ text: trimmed, size: 20, color: "555555", font: "Calibri" })]
+        }));
+        continue;
+      }
+
+      if (!trimmed) {
+        children.push(new Paragraph({ spacing: { after: 80 } }));
+        continue;
+      }
+
+      if (isSectionHeader(trimmed)) {
+        children.push(new Paragraph({
+          spacing: { before: 240, after: 80 },
+          border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: "CC4400", space: 4 } },
+          children: [new TextRun({ text: trimmed.toUpperCase(), bold: true, size: 24, color: "CC4400", font: "Calibri" })]
+        }));
+        continue;
+      }
+
+      if (/^[•\-·]\s/.test(trimmed)) {
+        children.push(new Paragraph({
+          bullet: { level: 0 },
+          spacing: { after: 60 },
+          children: [new TextRun({ text: trimmed.replace(/^[•\-·]\s*/, ""), size: 21, font: "Calibri", color: "222222" })]
+        }));
+        continue;
+      }
+
+      // Job title lines often have | separators — render slightly bolder
+      const isTitleLine = trimmed.includes("|") && !trimmed.includes("@");
+      children.push(new Paragraph({
+        spacing: { after: 60 },
+        children: [new TextRun({ text: trimmed, size: 21, bold: isTitleLine, font: "Calibri", color: "222222" })]
+      }));
+    }
+
+    const doc = new Document({
+      sections: [{ properties: { page: { margin: { top: 720, bottom: 720, left: 900, right: 900 } } }, children }]
+    });
+
+    const blob = await Packer.toBlob(doc);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "tailored-resume.docx"; a.click();
+    URL.revokeObjectURL(url);
+  };
+
   // ─── RENDER ──────────────────────────────────────────────────────────────
   return (
     <div style={{ minHeight: "100vh", background: "#070710", color: "#e0e0d8", fontFamily: "'Courier New', monospace" }}>
@@ -327,21 +427,67 @@ export default function App() {
             {error && <div style={{ background: "#ff4d4d12", border: "1px solid #ff4d4d44", padding: "12px 16px", marginBottom: 18, fontSize: 12, color: "#ff4d4d" }}>⚠ {error}</div>}
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginBottom: 20 }}>
-              {[
-                { label: "▸ JOB DESCRIPTION", val: jd, set: setJd, ph: "Paste the full job description — requirements, responsibilities, qualifications..." },
-                { label: "▸ YOUR RESUME", val: resume, set: setResume, ph: "Paste your resume text — experience, skills, education, certifications..." }
-              ].map(({ label, val, set, ph }) => (
-                <div key={label}>
-                  <label style={{ display: "block", fontSize: 10, letterSpacing: "0.2em", color: "#ff6600", marginBottom: 7 }}>{label}</label>
-                  <textarea value={val} onChange={e => set(e.target.value)} placeholder={ph}
+              {/* Job Description */}
+              <div>
+                <label style={{ display: "block", fontSize: 10, letterSpacing: "0.2em", color: "#ff6600", marginBottom: 7 }}>▸ JOB DESCRIPTION</label>
+                <textarea value={jd} onChange={e => setJd(e.target.value)}
+                  placeholder="Paste the full job description — requirements, responsibilities, qualifications..."
+                  style={{
+                    width: "100%", height: 300, padding: 14,
+                    background: "#0c0c17", border: "1px solid #1a1a24", borderTop: "2px solid #ff6600",
+                    color: "#ddd", fontFamily: "inherit", fontSize: 12,
+                    resize: "vertical", outline: "none", lineHeight: 1.7, boxSizing: "border-box"
+                  }} />
+              </div>
+
+              {/* Resume with .docx upload */}
+              <div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 7 }}>
+                  <label style={{ fontSize: 10, letterSpacing: "0.2em", color: "#ff6600" }}>▸ YOUR RESUME</label>
+                  <label style={{
+                    fontSize: 9, letterSpacing: "0.15em", color: "#ff6600", cursor: "pointer",
+                    padding: "3px 10px", border: "1px solid #ff660044",
+                    transition: "all 0.2s"
+                  }}
+                    onMouseEnter={e => e.currentTarget.style.background = "#ff660015"}
+                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                  >
+                    ↑ UPLOAD .DOCX
+                    <input type="file" accept=".docx" style={{ display: "none" }}
+                      onChange={e => e.target.files[0] && processDocxFile(e.target.files[0])} />
+                  </label>
+                </div>
+                <div
+                  onDragOver={e => { e.preventDefault(); setResumeDragOver(true); }}
+                  onDragLeave={() => setResumeDragOver(false)}
+                  onDrop={e => { e.preventDefault(); setResumeDragOver(false); e.dataTransfer.files[0] && processDocxFile(e.dataTransfer.files[0]); }}
+                  style={{ position: "relative" }}
+                >
+                  {resumeDragOver && (
+                    <div style={{
+                      position: "absolute", inset: 0, zIndex: 10,
+                      background: "#ff660018", border: "2px dashed #ff6600",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: 12, color: "#ff6600", letterSpacing: "0.15em", pointerEvents: "none"
+                    }}>DROP .DOCX HERE</div>
+                  )}
+                  {resumeFileName && (
+                    <div style={{ fontSize: 9, color: "#ff660099", letterSpacing: "0.1em", marginBottom: 4 }}>
+                      ✓ {resumeFileName}
+                    </div>
+                  )}
+                  <textarea value={resume} onChange={e => { setResume(e.target.value); setResumeFileName(""); }}
+                    placeholder="Paste your resume text — or drop / upload a .docx file above"
                     style={{
-                      width: "100%", height: 300, padding: 14,
-                      background: "#0c0c17", border: "1px solid #1a1a24", borderTop: "2px solid #ff6600",
+                      width: "100%", height: resumeFileName ? 288 : 300, padding: 14,
+                      background: resumeDragOver ? "#ff660008" : "#0c0c17",
+                      border: "1px solid #1a1a24", borderTop: "2px solid #ff6600",
                       color: "#ddd", fontFamily: "inherit", fontSize: 12,
-                      resize: "vertical", outline: "none", lineHeight: 1.7, boxSizing: "border-box"
+                      resize: "vertical", outline: "none", lineHeight: 1.7, boxSizing: "border-box",
+                      transition: "background 0.2s"
                     }} />
                 </div>
-              ))}
+              </div>
             </div>
             <Btn onClick={runAnalysis} style={{ padding: "15px 44px", fontSize: 12 }}>▶ ANALYZE FIT</Btn>
           </div>
@@ -580,6 +726,9 @@ export default function App() {
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               <Btn onClick={copy} color="#00e5a0" textColor="#000" style={{ padding: "13px 28px" }}>
                 {copied ? "✓ COPIED!" : "⧉ COPY RESUME"}
+              </Btn>
+              <Btn onClick={downloadAsWord} color="#4da6ff" textColor="#000" style={{ padding: "13px 28px" }}>
+                ↓ DOWNLOAD AS WORD
               </Btn>
               <Btn onClick={() => setStep("chat")} outline color="#ff6600" style={{ padding: "13px 20px" }}>← BACK TO INTERVIEW</Btn>
               <Btn onClick={reset} outline style={{ padding: "13px 20px" }}>↺ START OVER</Btn>
