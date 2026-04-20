@@ -334,7 +334,8 @@ function InputStage({ onAnalyze }) {
             </div>
             <span className="mono" style={{ fontSize: 9, color: 'var(--text-dim)', letterSpacing: '0.1em' }}>{jd.length} BYTES</span>
           </div>
-          <textarea style={taStyle} placeholder={"// PASTE JOB DESCRIPTION\n// Include full requirements, responsibilities, qualifications..."} value={jd} onChange={e => setJd(e.target.value)} onFocus={() => setJdFocus(true)} onBlur={() => setJdFocus(false)} />
+          <textarea style={taStyle} placeholder={`// PASTE JOB DESCRIPTION
+// Include full requirements, responsibilities, qualifications...`} value={jd} onChange={e => setJd(e.target.value)} onFocus={() => setJdFocus(true)} onBlur={() => setJdFocus(false)} />
           {jdFocus && <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '1px', background: 'linear-gradient(90deg,transparent,var(--cyan),transparent)', animation: 'holoPan 2s linear infinite', backgroundSize: '200% 100%' }} />}
         </CyberPanel>
         <CyberPanel style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }} color={rFocus || dragOver ? 'magenta' : 'cyan'} hover={false}>
@@ -363,7 +364,8 @@ function InputStage({ onAnalyze }) {
             </div>
           )}
           <input ref={fileInputRef} type="file" accept=".docx" style={{ display: 'none' }} onChange={e => e.target.files[0] && parseDocx(e.target.files[0])} />
-          <textarea style={{ ...taStyle, color: resume ? 'var(--text)' : 'var(--text-dim)' }} placeholder={"// OR PASTE RESUME TEXT\n// Work history, skills, education, achievements..."} value={resume} onChange={e => { setResume(e.target.value); if (!e.target.value) setDocxName(''); }} onFocus={() => setRFocus(true)} onBlur={() => setRFocus(false)} />
+          <textarea style={{ ...taStyle, color: resume ? 'var(--text)' : 'var(--text-dim)' }} placeholder={`// OR PASTE RESUME TEXT
+// Work history, skills, education, achievements...`} value={resume} onChange={e => { setResume(e.target.value); if (!e.target.value) setDocxName(''); }} onFocus={() => setRFocus(true)} onBlur={() => setRFocus(false)} />
           {resume && <button onClick={() => { setResume(''); setDocxName(''); }} style={{ alignSelf: 'flex-end', margin: '0 12px 10px', padding: '3px 12px', background: 'transparent', border: '1px solid rgba(255,0,255,0.3)', color: 'var(--text-dim)', fontFamily: 'Share Tech Mono', fontSize: 9, letterSpacing: '0.15em', cursor: 'pointer' }}>CLEAR</button>}
         </CyberPanel>
       </div>
@@ -576,7 +578,7 @@ function ATSStage({ data, onRestart }) {
 }
 
 export default function App() {
-  const [showIntro, setShowIntro] = useState(() => !localStorage.getItem('cf_seen'));
+  const [showIntro, setShowIntro] = useState(true);
   const [stage, setStage] = useState(() => { const s = localStorage.getItem('cf_stage'); return s ? parseInt(s) : 0; });
   const [progress, setProgress] = useState(0);
   const [analysisData, setAnalysisData] = useState(() => { try { const d = localStorage.getItem('cf_data'); return d ? JSON.parse(d) : null; } catch { return null; } });
