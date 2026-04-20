@@ -1,8 +1,27 @@
 import { useState, useRef, useEffect } from "react";
 import mammoth from "mammoth";
 
-// ─── PROMPTS ────────────────────────────────────────────────────────────────
+// ─── PALETTE ─────────────────────────────────────────────────────────────────
+const C = {
+  void:     "#070b12",
+  bg:       "#0b1018",
+  panel:    "#0d1420",
+  border:   "#1e2d40",
+  cyan:     "#00d4ff",
+  magenta:  "#e040fb",
+  green:    "#00e676",
+  amber:    "#ffab40",
+  red:      "#ff5252",
+  text:     "#a8c0d8",
+  textH:    "#ddf0ff",
+  textMid:  "#506878",
+  textDim:  "#253040",
+};
 
+const scoreColor = s => s >= 80 ? C.green : s >= 60 ? C.amber : C.red;
+const STEPS = ["intro", "input", "analyzing", "results", "chat", "tailoring", "tailored"];
+
+// ─── PROMPTS ─────────────────────────────────────────────────────────────────
 const fitSystemPrompt = `You are a Brutally Honest Job Fit Analyzer with expertise in recruitment and industry hiring standards. You give candid, evidence-based assessments without sugarcoating.
 
 Analyze the job description vs resume and respond ONLY with a valid JSON object — no markdown, no preamble:
@@ -66,8 +85,7 @@ RULES:
 
 Respond ONLY with the rewritten resume as clean plain text. Start with the candidate name and contact info.`;
 
-// ─── HELPERS ────────────────────────────────────────────────────────────────
-
+// ─── AI ──────────────────────────────────────────────────────────────────────
 const callClaude = async (systemPrompt, messages, maxTokens = 1000) => {
   const res = await fetch("/api/generate", {
     method: "POST",
@@ -82,102 +100,139 @@ const callClaude = async (systemPrompt, messages, maxTokens = 1000) => {
   return data.text || "";
 };
 
-const STEPS = ["input", "analyzing", "results", "chat", "tailoring", "tailored"];
-const scoreColor = s => s >= 80 ? "#00e5a0" : s >= 60 ? "#f5a623" : "#ff4d4d";
+// ─── CANVAS PARTICLES ────────────────────────────────────────────────────────
+function ParticleBG() {
+  const ref = useRef(null);
+  useEffect(() => {
+    const cv = ref.current; if (!cv) return;
+    const ctx = cv.getContext("2d");
+    let raf;
+    const resize = () => { cv.width = window.innerWidth; cv.height = window.innerHeight; };
+    resize();
+    window.addEventListener("resize", resize);
+    const pts = Array.from({ length: 65 }, () => ({
+      x: Math.random() * cv.width, y: Math.random() * cv.height,
+      vx: (Math.random() - 0.5) * 0.25, vy: (Math.random() - 0.5) * 0.25,
+    }));
+    const tick = () => {
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      pts.forEach(p => {
+        p.x += p.vx; p.y += p.vy;
+        if (p.x < 0 || p.x > cv.width) p.vx *= -1;
+        if (p.y < 0 || p.y > cv.height) p.vy *= -1;
+      });
+      pts.forEach((a, i) => {
+        pts.slice(i + 1).forEach(b => {
+          const d = Math.hypot(a.x - b.x, a.y - b.y);
+          if (d < 140) {
+            ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+            ctx.strokeStyle = `rgba(0,180,255,${(1 - d / 140) * 0.1})`; ctx.stroke();
+          }
+        });
+        ctx.beginPath(); ctx.arc(a.x, a.y, 1, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(0,180,255,0.35)"; ctx.fill();
+      });
+      raf = requestAnimationFrame(tick);
+    };
+    tick();
+    return () => { cancelAnimationFrame(raf); window.removeEventListener("resize", resize); };
+  }, []);
+  return <canvas ref={ref} style={{ position: "fixed", inset: 0, zIndex: 0, pointerEvents: "none" }} />;
+}
 
-// ─── SMALL COMPONENTS ───────────────────────────────────────────────────────
-
-function Spinner({ color = "#ff6600" }) {
+// ─── UI COMPONENTS ───────────────────────────────────────────────────────────
+function CyberPanel({ children, accent = C.cyan, style = {} }) {
   return (
     <div style={{
-      width: 70, height: 70, margin: "0 auto",
-      border: `2px solid ${color}22`,
-      borderTop: `2px solid ${color}`,
-      borderRadius: "50%", animation: "spin 0.9s linear infinite"
-    }} />
-  );
-}
-
-function Tag({ children, color }) {
-  return (
-    <span style={{
-      padding: "4px 10px", fontSize: 11,
-      background: `${color}14`, border: `1px solid ${color}55`, color
-    }}>{children}</span>
-  );
-}
-
-function Panel({ children, style = {} }) {
-  return (
-    <div style={{ border: "1px solid #1a1a24", background: "#0d0d16", padding: 24, ...style }}>
+      background: C.panel, borderTop: `2px solid ${accent}`,
+      border: `1px solid ${accent}28`, padding: 22, position: "relative", ...style
+    }}>
+      <div style={{ position: "absolute", bottom: 0, right: 0, width: 10, height: 10, borderBottom: `2px solid ${accent}55`, borderRight: `2px solid ${accent}55` }} />
       {children}
     </div>
   );
 }
 
-function SectionLabel({ color = "#ff6600", children }) {
-  return <div style={{ fontSize: 10, letterSpacing: "0.2em", color, marginBottom: 14 }}>{children}</div>;
-}
-
-function Btn({ onClick, color = "#ff6600", textColor = "#000", children, outline = false, disabled = false, style = {} }) {
+function NeonBtn({ children, onClick, color = C.cyan, textColor = "#000", outline = false, disabled = false, sm = false, style = {} }) {
   const [h, setH] = useState(false);
   return (
-    <button
-      onClick={onClick} disabled={disabled}
+    <button onClick={onClick} disabled={disabled}
       onMouseEnter={() => setH(true)} onMouseLeave={() => setH(false)}
       style={{
-        background: outline ? "transparent" : h ? "#ff8533" : color,
-        color: outline ? (h ? color : "#555") : textColor,
-        border: outline ? `1px solid ${h ? color : "#2a2a3a"}` : "none",
-        padding: "13px 28px", fontSize: 11, fontFamily: "inherit",
-        fontWeight: 700, letterSpacing: "0.14em", cursor: disabled ? "not-allowed" : "pointer",
-        textTransform: "uppercase", transition: "all 0.2s", opacity: disabled ? 0.4 : 1,
-        clipPath: outline ? "none" : "polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,0 100%)",
+        background: outline ? "transparent" : h ? color : color + "cc",
+        color: outline ? (h ? color : C.textMid) : textColor,
+        border: `1px solid ${outline ? (h ? color : C.border) : color}`,
+        padding: sm ? "7px 16px" : "13px 28px",
+        fontFamily: "Orbitron, monospace", fontSize: sm ? 9 : 11,
+        fontWeight: 700, letterSpacing: "0.15em",
+        cursor: disabled ? "not-allowed" : "pointer", textTransform: "uppercase",
+        transition: "all 0.2s", opacity: disabled ? 0.35 : 1,
+        boxShadow: !outline && h ? `0 0 20px ${color}55, 0 0 40px ${color}22` : "none",
         ...style
-      }}
-    >{children}</button>
+      }}>
+      {children}
+    </button>
   );
 }
 
-function ScoreRing({ score }) {
-  const color = scoreColor(score);
-  const r = 46, circ = 2 * Math.PI * r;
+function CyberTag({ children, color = C.cyan }) {
   return (
-    <div style={{ position: "relative", width: 120, height: 120 }}>
-      <svg width={120} height={120} style={{ transform: "rotate(-90deg)" }}>
-        <circle cx={60} cy={60} r={r} fill="none" stroke="#1a1a24" strokeWidth={8} />
-        <circle cx={60} cy={60} r={r} fill="none" stroke={color} strokeWidth={8}
-          strokeDasharray={`${(score / 100) * circ} ${circ}`} strokeLinecap="square" />
+    <span style={{
+      padding: "3px 9px", fontSize: 11,
+      fontFamily: "'Share Tech Mono', monospace",
+      background: color + "18", border: `1px solid ${color}44`, color,
+    }}>{children}</span>
+  );
+}
+
+function Lbl({ children, color = C.cyan, style = {} }) {
+  return (
+    <div style={{
+      fontFamily: "Orbitron, monospace", fontSize: 9,
+      letterSpacing: "0.25em", color, marginBottom: 12,
+      textTransform: "uppercase", ...style
+    }}>{children}</div>
+  );
+}
+
+function HexScore({ score }) {
+  const color = scoreColor(score);
+  const r = 50, circ = 2 * Math.PI * r;
+  return (
+    <div style={{ position: "relative", width: 140, height: 140, margin: "0 auto" }}>
+      <svg width={140} height={140} style={{ transform: "rotate(-90deg)" }}>
+        <circle cx={70} cy={70} r={r} fill="none" stroke={C.border} strokeWidth={7} />
+        <circle cx={70} cy={70} r={r} fill="none" stroke={color} strokeWidth={7}
+          strokeDasharray={`${(score / 100) * circ} ${circ}`} strokeLinecap="butt"
+          style={{ filter: `drop-shadow(0 0 6px ${color})` }} />
       </svg>
       <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ fontSize: 30, fontWeight: 700, color, lineHeight: 1 }}>{score}</div>
-        <div style={{ fontSize: 10, color: "#444" }}>/ 100</div>
+        <div style={{ fontFamily: "Orbitron, monospace", fontSize: 36, fontWeight: 900, color, lineHeight: 1 }}>{score}</div>
+        <div style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: 9, color: color + "88", letterSpacing: "0.15em", marginTop: 2 }}>/ 100</div>
       </div>
+    </div>
+  );
+}
+
+function Spin({ color = C.cyan }) {
+  return (
+    <div style={{ width: 72, height: 72, margin: "0 auto", position: "relative" }}>
+      <div style={{ position: "absolute", inset: 0, border: `1px solid ${color}22`, borderTop: `2px solid ${color}`, borderRadius: "50%", animation: "cfSpin 0.9s linear infinite", boxShadow: `0 0 14px ${color}33 inset` }} />
+      <div style={{ position: "absolute", inset: 12, border: `1px solid ${color}11`, borderBottom: `1px solid ${color}88`, borderRadius: "50%", animation: "cfSpin 0.65s linear infinite reverse" }} />
     </div>
   );
 }
 
 function ChatBubble({ role, content }) {
   const isAI = role === "assistant";
+  const color = isAI ? C.cyan : C.green;
   const display = content.replace("[READY_TO_TAILOR]", "").trim();
   return (
-    <div style={{ display: "flex", gap: 10, marginBottom: 18, flexDirection: isAI ? "row" : "row-reverse", animation: "fadeIn 0.3s ease" }}>
-      <div style={{
-        width: 28, height: 28, flexShrink: 0, display: "flex",
-        alignItems: "center", justifyContent: "center",
-        background: isAI ? "#ff6600" : "#111", fontSize: 9,
-        color: isAI ? "#000" : "#555", fontWeight: 700,
-        border: isAI ? "none" : "1px solid #2a2a3a"
-      }}>
-        {isAI ? "AI" : "YOU"}
+    <div style={{ display: "flex", gap: 10, marginBottom: 18, flexDirection: isAI ? "row" : "row-reverse" }}>
+      <div style={{ width: 30, height: 30, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: color + "18", border: `1px solid ${color}44`, fontFamily: "Orbitron, monospace", fontSize: 7, fontWeight: 700, color, letterSpacing: "0.1em" }}>
+        {isAI ? "SYS" : "YOU"}
       </div>
-      <div style={{
-        maxWidth: "74%", padding: "12px 16px", fontSize: 13, lineHeight: 1.75,
-        background: isAI ? "#0f0f1c" : "#0c0c14",
-        border: `1px solid ${isAI ? "#ff660025" : "#00e5a025"}`,
-        borderLeft: `3px solid ${isAI ? "#ff6600" : "#00e5a0"}`,
-        color: isAI ? "#ccc" : "#999", whiteSpace: "pre-wrap"
-      }}>
+      <div style={{ maxWidth: "75%", padding: "10px 15px", fontSize: 13, lineHeight: 1.75, background: isAI ? "#0a1520" : "#0a1812", border: `1px solid ${color}20`, borderLeft: isAI ? `3px solid ${C.cyan}` : "none", borderRight: isAI ? "none" : `3px solid ${C.green}`, color: C.text, whiteSpace: "pre-wrap", fontFamily: "Rajdhani, sans-serif" }}>
         {display}
       </div>
     </div>
@@ -185,9 +240,8 @@ function ChatBubble({ role, content }) {
 }
 
 // ─── MAIN APP ────────────────────────────────────────────────────────────────
-
 export default function App() {
-  const [step, setStep] = useState("input");
+  const [step, setStep] = useState("intro");
   const [jd, setJd] = useState("");
   const [resume, setResume] = useState("");
   const [analysis, setAnalysis] = useState(null);
@@ -207,7 +261,6 @@ export default function App() {
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatHistory, chatLoading]);
 
-  // Stage 1: Fit Analysis
   const runAnalysis = async () => {
     if (!jd.trim() || !resume.trim()) { setError("Please provide both the job description and your resume."); return; }
     setError(""); setStep("analyzing");
@@ -220,7 +273,6 @@ export default function App() {
     } catch (e) { setError(`Analysis failed — ${e.message}`); setStep("input"); }
   };
 
-  // Stage 2a: Start Chat
   const startChat = async () => {
     setStep("chat"); setChatLoading(true); setChatHistory([]); setChatDone(false);
     try {
@@ -232,7 +284,6 @@ export default function App() {
     finally { setChatLoading(false); }
   };
 
-  // Stage 2b: Send message
   const sendMessage = async () => {
     if (!chatInput.trim() || chatLoading) return;
     const userMsg = { role: "user", content: chatInput.trim() };
@@ -248,7 +299,6 @@ export default function App() {
     finally { setChatLoading(false); inputRef.current?.focus(); }
   };
 
-  // Stage 3: Tailor
   const tailorResume = async () => {
     setStep("tailoring");
     try {
@@ -263,36 +313,31 @@ export default function App() {
   const reset = () => {
     setStep("input"); setAnalysis(null); setChatHistory([]);
     setTailoredResume(""); setError(""); setJd(""); setResume("");
-    setChatDone(false); setCopied(false);
+    setChatDone(false); setCopied(false); setResumeFileName("");
   };
 
   const copy = () => { navigator.clipboard.writeText(tailoredResume); setCopied(true); setTimeout(() => setCopied(false), 2000); };
 
   const processDocxFile = async (file) => {
-    if (!file || !file.name.endsWith(".docx")) {
-      setError("Please upload a .docx file."); return;
-    }
+    if (!file || !file.name.endsWith(".docx")) { setError("Please upload a .docx file."); return; }
     try {
       const arrayBuffer = await file.arrayBuffer();
       const result = await mammoth.extractRawText({ arrayBuffer });
       setResume(result.value.trim());
       setResumeFileName(file.name);
       setError("");
-    } catch (e) {
-      setError(`Failed to read Word file — ${e.message}`);
-    }
+    } catch (e) { setError(`Failed to read Word file — ${e.message}`); }
   };
 
   const downloadAsWord = async () => {
-    const { Document, Packer, Paragraph, TextRun, AlignmentType, BorderStyle, UnderlineType } = await import("docx");
+    const { Document, Packer, Paragraph, TextRun, AlignmentType, BorderStyle } = await import("docx");
 
     const SECTION_HEADERS = ["PROFESSIONAL SUMMARY", "SUMMARY", "OBJECTIVE", "EXPERIENCE",
       "WORK EXPERIENCE", "SKILLS", "TECHNICAL SKILLS", "EDUCATION", "CERTIFICATIONS",
       "PROJECTS", "ACHIEVEMENTS", "AWARDS", "PUBLICATIONS", "VOLUNTEER", "LANGUAGES", "INTERESTS"];
 
     const isSectionHeader = (line) => {
-      const t = line.trim();
-      const up = t.toUpperCase();
+      const t = line.trim(); const up = t.toUpperCase();
       return SECTION_HEADERS.some(h => up === h || up === h + ":" || up.startsWith(h + " ")) ||
         (t === up && t.length > 2 && t.length < 50 && !/[@|•\-\d(]/.test(t));
     };
@@ -302,62 +347,28 @@ export default function App() {
 
     for (let i = 0; i < lines.length; i++) {
       const trimmed = lines[i].trim();
-
       if (i === 0 && trimmed) {
-        // Name — large, centred, bold
-        children.push(new Paragraph({
-          alignment: AlignmentType.CENTER,
-          spacing: { after: 60 },
-          children: [new TextRun({ text: trimmed, bold: true, size: 36, font: "Calibri" })]
-        }));
+        children.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 60 }, children: [new TextRun({ text: trimmed, bold: true, size: 36, font: "Calibri" })] }));
         continue;
       }
-
       if (i === 1 && trimmed && (trimmed.includes("@") || trimmed.includes("|") || trimmed.toLowerCase().includes("linkedin"))) {
-        // Contact line
-        children.push(new Paragraph({
-          alignment: AlignmentType.CENTER,
-          spacing: { after: 240 },
-          children: [new TextRun({ text: trimmed, size: 20, color: "555555", font: "Calibri" })]
-        }));
+        children.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 240 }, children: [new TextRun({ text: trimmed, size: 20, color: "555555", font: "Calibri" })] }));
         continue;
       }
-
-      if (!trimmed) {
-        children.push(new Paragraph({ spacing: { after: 80 } }));
-        continue;
-      }
-
+      if (!trimmed) { children.push(new Paragraph({ spacing: { after: 80 } })); continue; }
       if (isSectionHeader(trimmed)) {
-        children.push(new Paragraph({
-          spacing: { before: 240, after: 80 },
-          border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: "CC4400", space: 4 } },
-          children: [new TextRun({ text: trimmed.toUpperCase(), bold: true, size: 24, color: "CC4400", font: "Calibri" })]
-        }));
+        children.push(new Paragraph({ spacing: { before: 240, after: 80 }, border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: "005588", space: 4 } }, children: [new TextRun({ text: trimmed.toUpperCase(), bold: true, size: 24, color: "005588", font: "Calibri" })] }));
         continue;
       }
-
       if (/^[•\-·]\s/.test(trimmed)) {
-        children.push(new Paragraph({
-          bullet: { level: 0 },
-          spacing: { after: 60 },
-          children: [new TextRun({ text: trimmed.replace(/^[•\-·]\s*/, ""), size: 21, font: "Calibri", color: "222222" })]
-        }));
+        children.push(new Paragraph({ bullet: { level: 0 }, spacing: { after: 60 }, children: [new TextRun({ text: trimmed.replace(/^[•\-·]\s*/, ""), size: 21, font: "Calibri", color: "222222" })] }));
         continue;
       }
-
-      // Job title lines often have | separators — render slightly bolder
       const isTitleLine = trimmed.includes("|") && !trimmed.includes("@");
-      children.push(new Paragraph({
-        spacing: { after: 60 },
-        children: [new TextRun({ text: trimmed, size: 21, bold: isTitleLine, font: "Calibri", color: "222222" })]
-      }));
+      children.push(new Paragraph({ spacing: { after: 60 }, children: [new TextRun({ text: trimmed, size: 21, bold: isTitleLine, font: "Calibri", color: "222222" })] }));
     }
 
-    const doc = new Document({
-      sections: [{ properties: { page: { margin: { top: 720, bottom: 720, left: 900, right: 900 } } }, children }]
-    });
-
+    const doc = new Document({ sections: [{ properties: { page: { margin: { top: 720, bottom: 720, left: 900, right: 900 } } }, children }] });
     const blob = await Packer.toBlob(doc);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -366,97 +377,128 @@ export default function App() {
   };
 
   // ─── RENDER ──────────────────────────────────────────────────────────────
-  return (
-    <div style={{ minHeight: "100vh", background: "#070710", color: "#e0e0d8", fontFamily: "'Courier New', monospace" }}>
+  const progressSteps = [
+    { key: "input", label: "INPUT" },
+    { key: "results", label: "ANALYSIS" },
+    { key: "chat", label: "INTERVIEW" },
+    { key: "tailored", label: "ATS RESUME" },
+  ];
 
-      {/* Grid BG */}
-      <div style={{
-        position: "fixed", inset: 0, zIndex: 0, pointerEvents: "none",
-        backgroundImage: `linear-gradient(rgba(255,102,0,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,102,0,0.025) 1px,transparent 1px)`,
-        backgroundSize: "44px 44px"
-      }} />
+  return (
+    <div style={{ minHeight: "100vh", background: C.void, color: C.text, fontFamily: "Rajdhani, sans-serif" }}>
+      <ParticleBG />
+
+      {/* Scanlines */}
+      <div style={{ position: "fixed", inset: 0, zIndex: 1, pointerEvents: "none", backgroundImage: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.07) 2px, rgba(0,0,0,0.07) 4px)" }} />
 
       {/* Header */}
-      <header style={{
-        position: "sticky", top: 0, zIndex: 100,
-        borderBottom: "1px solid #ff660033", padding: "14px 28px",
-        display: "flex", alignItems: "center", gap: 14,
-        background: "rgba(7,7,16,0.96)", backdropFilter: "blur(6px)"
-      }}>
-        <div style={{ width: 8, height: 8, background: "#ff6600", clipPath: "polygon(50% 0%,100% 100%,0% 100%)" }} />
-        <span style={{ color: "#ff6600", fontSize: 10, letterSpacing: "0.28em" }}>
-          CAREERFIT.AI // RESUME INTELLIGENCE PIPELINE
-        </span>
+      {step !== "intro" && (
+        <header style={{ position: "sticky", top: 0, zIndex: 100, borderBottom: `1px solid ${C.cyan}22`, padding: "13px 28px", display: "flex", alignItems: "center", gap: 16, background: "rgba(7,11,18,0.96)", backdropFilter: "blur(8px)" }}>
+          <button onClick={() => setStep("intro")} style={{ background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 8, padding: 0 }}>
+            <div style={{ width: 6, height: 6, background: C.cyan, boxShadow: `0 0 8px ${C.cyan}`, animation: "cfBlink 2s infinite" }} />
+            <span style={{ fontFamily: "Orbitron, monospace", color: C.cyan, fontSize: 11, fontWeight: 700, letterSpacing: "0.2em" }}>CAREERFIT.AI</span>
+          </button>
 
-        {/* Progress */}
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 0 }}>
-          {[
-            { key: "input", label: "INPUT" },
-            { key: "results", label: "ANALYSIS" },
-            { key: "chat", label: "INTERVIEW" },
-            { key: "tailored", label: "ATS RESUME" }
-          ].map(({ key, label }, i) => {
-            const done = stepIdx >= STEPS.indexOf(key);
-            return (
-              <div key={key} style={{ display: "flex", alignItems: "center" }}>
-                {i > 0 && <div style={{ width: 24, height: 1, background: done ? "#ff6600" : "#1a1a24" }} />}
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
-                  <div style={{ width: 7, height: 7, background: done ? "#ff6600" : "#1a1a24", transition: "all 0.4s", boxShadow: done ? "0 0 7px #ff6600" : "none" }} />
-                  <span style={{ fontSize: 8, color: done ? "#ff6600" : "#2a2a3a", letterSpacing: "0.15em" }}>{label}</span>
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 0 }}>
+            {progressSteps.map(({ key, label }, i) => {
+              const done = stepIdx >= STEPS.indexOf(key);
+              return (
+                <div key={key} style={{ display: "flex", alignItems: "center" }}>
+                  {i > 0 && <div style={{ width: 28, height: 1, background: done ? C.cyan + "66" : C.border }} />}
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+                    <div style={{ width: 6, height: 6, background: done ? C.cyan : C.border, boxShadow: done ? `0 0 6px ${C.cyan}` : "none", transition: "all 0.4s" }} />
+                    <span style={{ fontFamily: "Orbitron, monospace", fontSize: 7, color: done ? C.cyan : C.textDim, letterSpacing: "0.1em" }}>{label}</span>
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
-      </header>
+              );
+            })}
+          </div>
+        </header>
+      )}
 
-      <main style={{ position: "relative", zIndex: 1, maxWidth: 980, margin: "0 auto", padding: "36px 20px 60px" }}>
+      <main style={{ position: "relative", zIndex: 2, maxWidth: step === "intro" ? "100%" : 1000, margin: "0 auto", padding: step === "intro" ? 0 : "40px 24px 80px" }}>
 
-        {/* ══ INPUT ══════════════════════════════════════════════════════ */}
+        {/* ══ INTRO ════════════════════════════════════════════════════════════ */}
+        {step === "intro" && (
+          <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "48px 24px", textAlign: "center" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 32 }}>
+              <div style={{ width: 2, height: 36, background: `linear-gradient(to bottom, transparent, ${C.cyan}, transparent)` }} />
+              <span style={{ fontFamily: "Orbitron, monospace", fontSize: 10, color: C.textMid, letterSpacing: "0.4em" }}>NEURAL CAREER INTELLIGENCE</span>
+              <div style={{ width: 2, height: 36, background: `linear-gradient(to bottom, transparent, ${C.cyan}, transparent)` }} />
+            </div>
+
+            <h1 className="glitch-title" data-text="CAREERFIT.AI" style={{ fontFamily: "Orbitron, monospace", fontSize: "clamp(44px,8vw,88px)", fontWeight: 900, margin: "0 0 8px", color: C.textH, letterSpacing: "-0.01em", lineHeight: 1 }}>
+              CAREERFIT<span style={{ color: C.cyan }}>.</span>AI
+            </h1>
+
+            <div style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: "clamp(11px,1.8vw,15px)", color: C.cyan, letterSpacing: "0.28em", marginBottom: 52 }}>
+              RESUME INTELLIGENCE PIPELINE v2.0
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, marginBottom: 52, maxWidth: 620, width: "100%" }}>
+              {[
+                { icon: "◈", label: "FIT ANALYSIS", sub: "Score + gaps + strengths" },
+                { icon: "◉", label: "AI INTERVIEW", sub: "Uncover hidden experience" },
+                { icon: "◎", label: "ATS OPTIMIZER", sub: "90+ score resume" },
+              ].map(({ icon, label, sub }) => (
+                <div key={label} style={{ padding: "20px 14px", border: `1px solid ${C.border}`, background: C.panel + "99", textAlign: "center" }}>
+                  <div style={{ fontFamily: "Orbitron, monospace", fontSize: 22, color: C.cyan, marginBottom: 8 }}>{icon}</div>
+                  <div style={{ fontFamily: "Orbitron, monospace", fontSize: 9, color: C.textH, letterSpacing: "0.15em", marginBottom: 5 }}>{label}</div>
+                  <div style={{ fontFamily: "Rajdhani, sans-serif", fontSize: 12, color: C.textMid }}>{sub}</div>
+                </div>
+              ))}
+            </div>
+
+            <NeonBtn onClick={() => setStep("input")} style={{ padding: "16px 56px", fontSize: 13 }}>
+              ▶ INITIALIZE SYSTEM
+            </NeonBtn>
+
+            <div style={{ marginTop: 28, fontFamily: "'Share Tech Mono', monospace", fontSize: 10, color: C.textDim, letterSpacing: "0.18em" }}>
+              GROQ LLAMA-3.3-70B · MAMMOTH DOCX · ATS INTELLIGENCE
+            </div>
+          </div>
+        )}
+
+        {/* ══ INPUT ════════════════════════════════════════════════════════════ */}
         {step === "input" && (
-          <div style={{ animation: "fadeIn 0.4s ease" }}>
-            <div style={{ marginBottom: 36 }}>
-              <h1 style={{ fontSize: "clamp(24px,5vw,44px)", fontWeight: 700, letterSpacing: "-0.02em", color: "#fff", lineHeight: 1.1, margin: "0 0 8px" }}>
-                JOB FIT<br /><span style={{ color: "#ff6600" }}>ANALYSIS ENGINE</span>
+          <div style={{ animation: "cfFadeUp 0.4s ease" }}>
+            <div style={{ marginBottom: 32 }}>
+              <h1 style={{ fontFamily: "Orbitron, monospace", fontSize: "clamp(22px,4vw,38px)", fontWeight: 900, color: C.textH, margin: "0 0 8px", letterSpacing: "-0.01em" }}>
+                JOB FIT <span style={{ color: C.cyan }}>ANALYSIS</span>
               </h1>
-              <p style={{ color: "#444", fontSize: 11, letterSpacing: "0.07em", margin: 0 }}>
+              <p style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: 11, color: C.textMid, letterSpacing: "0.1em", margin: 0 }}>
                 PASTE JD + RESUME → BRUTAL ANALYSIS → AI INTERVIEW → 90+ ATS RESUME
               </p>
             </div>
 
-            {error && <div style={{ background: "#ff4d4d12", border: "1px solid #ff4d4d44", padding: "12px 16px", marginBottom: 18, fontSize: 12, color: "#ff4d4d" }}>⚠ {error}</div>}
+            {error && (
+              <div style={{ background: C.red + "12", border: `1px solid ${C.red}44`, padding: "12px 16px", marginBottom: 18, fontSize: 13, color: C.red, fontFamily: "Rajdhani, sans-serif" }}>
+                ⚠ {error}
+              </div>
+            )}
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginBottom: 20 }}>
-              {/* Job Description */}
-              <div>
-                <label style={{ display: "block", fontSize: 10, letterSpacing: "0.2em", color: "#ff6600", marginBottom: 7 }}>▸ JOB DESCRIPTION</label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginBottom: 22 }}>
+              <CyberPanel>
+                <Lbl>▸ Job Description</Lbl>
                 <textarea value={jd} onChange={e => setJd(e.target.value)}
                   placeholder="Paste the full job description — requirements, responsibilities, qualifications..."
-                  style={{
-                    width: "100%", height: 300, padding: 14,
-                    background: "#0c0c17", border: "1px solid #1a1a24", borderTop: "2px solid #ff6600",
-                    color: "#ddd", fontFamily: "inherit", fontSize: 12,
-                    resize: "vertical", outline: "none", lineHeight: 1.7, boxSizing: "border-box"
-                  }} />
-              </div>
+                  style={{ width: "100%", height: 300, padding: 12, background: C.void, border: `1px solid ${C.border}`, color: C.text, fontFamily: "Rajdhani, sans-serif", fontSize: 13, resize: "vertical", outline: "none", lineHeight: 1.6, boxSizing: "border-box" }} />
+              </CyberPanel>
 
-              {/* Resume with .docx upload */}
-              <div>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 7 }}>
-                  <label style={{ fontSize: 10, letterSpacing: "0.2em", color: "#ff6600" }}>▸ YOUR RESUME</label>
-                  <label style={{
-                    fontSize: 9, letterSpacing: "0.15em", color: "#ff6600", cursor: "pointer",
-                    padding: "3px 10px", border: "1px solid #ff660044",
-                    transition: "all 0.2s"
-                  }}
-                    onMouseEnter={e => e.currentTarget.style.background = "#ff660015"}
-                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                  >
+              <CyberPanel>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                  <Lbl style={{ marginBottom: 0 }}>▸ Your Resume</Lbl>
+                  <label style={{ fontFamily: "Orbitron, monospace", fontSize: 8, color: C.cyan, cursor: "pointer", padding: "4px 10px", border: `1px solid ${C.cyan}44`, letterSpacing: "0.1em", transition: "all 0.2s" }}
+                    onMouseEnter={e => e.currentTarget.style.background = C.cyan + "15"}
+                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                     ↑ UPLOAD .DOCX
                     <input type="file" accept=".docx" style={{ display: "none" }}
                       onChange={e => e.target.files[0] && processDocxFile(e.target.files[0])} />
                   </label>
                 </div>
+                {resumeFileName && (
+                  <div style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: 9, color: C.cyan + "88", letterSpacing: "0.1em", marginBottom: 6 }}>✓ {resumeFileName}</div>
+                )}
                 <div
                   onDragOver={e => { e.preventDefault(); setResumeDragOver(true); }}
                   onDragLeave={() => setResumeDragOver(false)}
@@ -464,274 +506,221 @@ export default function App() {
                   style={{ position: "relative" }}
                 >
                   {resumeDragOver && (
-                    <div style={{
-                      position: "absolute", inset: 0, zIndex: 10,
-                      background: "#ff660018", border: "2px dashed #ff6600",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      fontSize: 12, color: "#ff6600", letterSpacing: "0.15em", pointerEvents: "none"
-                    }}>DROP .DOCX HERE</div>
-                  )}
-                  {resumeFileName && (
-                    <div style={{ fontSize: 9, color: "#ff660099", letterSpacing: "0.1em", marginBottom: 4 }}>
-                      ✓ {resumeFileName}
+                    <div style={{ position: "absolute", inset: 0, zIndex: 10, background: C.cyan + "10", border: `2px dashed ${C.cyan}`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Orbitron, monospace", fontSize: 11, color: C.cyan, letterSpacing: "0.15em", pointerEvents: "none" }}>
+                      DROP .DOCX HERE
                     </div>
                   )}
                   <textarea value={resume} onChange={e => { setResume(e.target.value); setResumeFileName(""); }}
-                    placeholder="Paste your resume text — or drop / upload a .docx file above"
-                    style={{
-                      width: "100%", height: resumeFileName ? 288 : 300, padding: 14,
-                      background: resumeDragOver ? "#ff660008" : "#0c0c17",
-                      border: "1px solid #1a1a24", borderTop: "2px solid #ff6600",
-                      color: "#ddd", fontFamily: "inherit", fontSize: 12,
-                      resize: "vertical", outline: "none", lineHeight: 1.7, boxSizing: "border-box",
-                      transition: "background 0.2s"
-                    }} />
+                    placeholder="Paste resume text — or drop / upload a .docx file above"
+                    style={{ width: "100%", height: resumeFileName ? 286 : 300, padding: 12, background: resumeDragOver ? C.cyan + "08" : C.void, border: `1px solid ${C.border}`, color: C.text, fontFamily: "Rajdhani, sans-serif", fontSize: 13, resize: "vertical", outline: "none", lineHeight: 1.6, boxSizing: "border-box", transition: "background 0.2s" }} />
                 </div>
-              </div>
+              </CyberPanel>
             </div>
-            <Btn onClick={runAnalysis} style={{ padding: "15px 44px", fontSize: 12 }}>▶ ANALYZE FIT</Btn>
+            <NeonBtn onClick={runAnalysis}>▶ ANALYZE FIT</NeonBtn>
           </div>
         )}
 
-        {/* ══ ANALYZING ══════════════════════════════════════════════════ */}
+        {/* ══ ANALYZING ════════════════════════════════════════════════════════ */}
         {step === "analyzing" && (
           <div style={{ textAlign: "center", padding: "120px 0" }}>
-            <Spinner />
-            <div style={{ color: "#ff6600", fontSize: 11, letterSpacing: "0.3em", marginTop: 28 }}>PROCESSING RESUME INTELLIGENCE...</div>
-            <div style={{ color: "#2a2a3a", fontSize: 11, marginTop: 10 }}>Parsing JD → Mapping skills → Calculating fit matrix</div>
+            <Spin />
+            <div style={{ fontFamily: "Orbitron, monospace", color: C.cyan, fontSize: 11, letterSpacing: "0.3em", marginTop: 30 }}>PROCESSING RESUME INTELLIGENCE</div>
+            <div style={{ fontFamily: "'Share Tech Mono', monospace", color: C.textDim, fontSize: 11, marginTop: 10, animation: "cfBlink 1.4s infinite" }}>
+              PARSING JD → MAPPING SKILLS → CALCULATING FIT MATRIX_
+            </div>
           </div>
         )}
 
-        {/* ══ RESULTS ════════════════════════════════════════════════════ */}
+        {/* ══ RESULTS ══════════════════════════════════════════════════════════ */}
         {step === "results" && analysis && (
-          <div style={{ animation: "fadeIn 0.5s ease" }}>
+          <div style={{ animation: "cfFadeUp 0.5s ease" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 24, flexWrap: "wrap" }}>
-              <span style={{ fontSize: 10, letterSpacing: "0.28em", color: "#ff6600" }}>▸ JOB FIT ANALYSIS</span>
-              <div style={{ flex: 1, height: 1, background: "#1a1a24" }} />
-              <Btn onClick={reset} outline style={{ padding: "7px 18px", fontSize: 9 }}>↺ NEW ANALYSIS</Btn>
+              <span style={{ fontFamily: "Orbitron, monospace", fontSize: 9, letterSpacing: "0.25em", color: C.cyan }}>▸ JOB FIT ANALYSIS</span>
+              <div style={{ flex: 1, height: 1, background: `linear-gradient(to right, ${C.cyan}44, transparent)` }} />
+              <NeonBtn onClick={reset} outline sm>↺ NEW ANALYSIS</NeonBtn>
             </div>
 
-            {/* Score + Verdict */}
-            <Panel style={{ display: "grid", gridTemplateColumns: "130px 1fr", gap: 24, alignItems: "center", marginBottom: 16 }}>
+            <CyberPanel style={{ display: "grid", gridTemplateColumns: "160px 1fr", gap: 28, alignItems: "center", marginBottom: 16 }}>
               <div style={{ textAlign: "center" }}>
-                <ScoreRing score={analysis.score} />
-                <div style={{ fontSize: 9, letterSpacing: "0.2em", color: "#333", marginTop: 7 }}>FIT SCORE</div>
+                <HexScore score={analysis.score} />
+                <div style={{ fontFamily: "Orbitron, monospace", fontSize: 8, color: C.textMid, marginTop: 8, letterSpacing: "0.2em" }}>FIT SCORE</div>
               </div>
               <div>
-                <div style={{ display: "inline-block", padding: "4px 14px", marginBottom: 10, border: `1px solid ${scoreColor(analysis.score)}`, color: scoreColor(analysis.score), fontSize: 10, letterSpacing: "0.2em" }}>
+                <div style={{ display: "inline-block", padding: "5px 14px", marginBottom: 12, border: `1px solid ${scoreColor(analysis.score)}`, color: scoreColor(analysis.score), fontFamily: "Orbitron, monospace", fontSize: 10, letterSpacing: "0.2em" }}>
                   {analysis.verdict?.toUpperCase()}
                 </div>
-                <p style={{ color: "#888", fontSize: 13, lineHeight: 1.75, margin: 0 }}>{analysis.realityCheck}</p>
+                <p style={{ color: C.text, fontSize: 14, lineHeight: 1.75, margin: 0, fontFamily: "Rajdhani, sans-serif" }}>{analysis.realityCheck}</p>
               </div>
-            </Panel>
+            </CyberPanel>
 
-            {/* Matched / Missing */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
-              <Panel>
-                <SectionLabel color="#00e5a0">✓ MATCHED SKILLS</SectionLabel>
+              <CyberPanel accent={C.green}>
+                <Lbl color={C.green}>✓ Matched Skills</Lbl>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-                  {analysis.matchedSkills?.map((s, i) => <Tag key={i} color="#00e5a0">{s}</Tag>)}
+                  {analysis.matchedSkills?.map((s, i) => <CyberTag key={i} color={C.green}>{s}</CyberTag>)}
                 </div>
-              </Panel>
-              <Panel>
-                <SectionLabel color="#ff4d4d">✗ MISSING SKILLS</SectionLabel>
+              </CyberPanel>
+              <CyberPanel accent={C.red}>
+                <Lbl color={C.red}>✗ Missing Skills</Lbl>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-                  {analysis.missingSkills?.map((s, i) => <Tag key={i} color="#ff4d4d">{s}</Tag>)}
+                  {analysis.missingSkills?.map((s, i) => <CyberTag key={i} color={C.red}>{s}</CyberTag>)}
                 </div>
-              </Panel>
+              </CyberPanel>
             </div>
 
-            {/* Strengths / Gaps */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
-              <Panel>
-                <SectionLabel>▸ STRENGTHS</SectionLabel>
+              <CyberPanel>
+                <Lbl>▸ Strengths</Lbl>
                 {analysis.strengths?.map((s, i) => (
                   <div key={i} style={{ display: "flex", gap: 9, marginBottom: 9 }}>
-                    <span style={{ color: "#ff6600", fontSize: 9, flexShrink: 0, marginTop: 3 }}>→</span>
-                    <span style={{ fontSize: 12, color: "#aaa", lineHeight: 1.6 }}>{s}</span>
+                    <span style={{ color: C.cyan, fontSize: 10, flexShrink: 0 }}>→</span>
+                    <span style={{ fontSize: 13, color: C.text, lineHeight: 1.6, fontFamily: "Rajdhani, sans-serif" }}>{s}</span>
                   </div>
                 ))}
-              </Panel>
-              <Panel>
-                <SectionLabel color="#ff4d4d">⚠ CRITICAL GAPS</SectionLabel>
+              </CyberPanel>
+              <CyberPanel accent={C.amber}>
+                <Lbl color={C.amber}>⚠ Critical Gaps</Lbl>
                 {analysis.gaps?.map((g, i) => (
                   <div key={i} style={{ display: "flex", gap: 9, marginBottom: 9 }}>
-                    <span style={{ color: "#ff4d4d", fontSize: 9, flexShrink: 0, marginTop: 3 }}>✗</span>
-                    <span style={{ fontSize: 12, color: "#aaa", lineHeight: 1.6 }}>{g}</span>
+                    <span style={{ color: C.red, fontSize: 10, flexShrink: 0 }}>✗</span>
+                    <span style={{ fontSize: 13, color: C.text, lineHeight: 1.6, fontFamily: "Rajdhani, sans-serif" }}>{g}</span>
                   </div>
                 ))}
-              </Panel>
+              </CyberPanel>
             </div>
 
-            {/* Action Plan */}
-            <Panel style={{ marginBottom: 24 }}>
-              <SectionLabel>▸ ACTION PLAN</SectionLabel>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(230px,1fr))", gap: 10 }}>
+            <CyberPanel style={{ marginBottom: 16 }}>
+              <Lbl>▸ Action Plan</Lbl>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 10 }}>
                 {analysis.actionPlan?.map((a, i) => (
-                  <div key={i} style={{ background: "#070710", border: "1px solid #1a1a24", padding: 12, display: "flex", gap: 10 }}>
-                    <span style={{ color: "#ff6600", fontSize: 9, fontWeight: 700, background: "#ff660015", padding: "2px 5px", flexShrink: 0 }}>
-                      {String(i + 1).padStart(2, "0")}
-                    </span>
-                    <span style={{ fontSize: 11, color: "#888", lineHeight: 1.5 }}>{a}</span>
+                  <div key={i} style={{ background: C.void, border: `1px solid ${C.border}`, padding: "12px 14px", display: "flex", gap: 10 }}>
+                    <span style={{ fontFamily: "Orbitron, monospace", color: C.cyan, fontSize: 9, fontWeight: 700, background: C.cyan + "18", padding: "2px 5px", flexShrink: 0 }}>{String(i + 1).padStart(2, "0")}</span>
+                    <span style={{ fontSize: 13, color: C.textMid, lineHeight: 1.5, fontFamily: "Rajdhani, sans-serif" }}>{a}</span>
                   </div>
                 ))}
               </div>
-            </Panel>
+            </CyberPanel>
 
-            {/* CTA to Chat */}
-            <div style={{
-              background: "#0d0d1c", border: "1px solid #ff660025",
-              borderLeft: "3px solid #ff6600", padding: 22, marginBottom: 8
-            }}>
-              <div style={{ fontSize: 10, color: "#ff6600", letterSpacing: "0.18em", marginBottom: 8 }}>▸ NEXT: INTELLIGENCE INTERVIEW</div>
-              <p style={{ fontSize: 12, color: "#666", margin: "0 0 16px", lineHeight: 1.65 }}>
-                Before tailoring your resume, our AI will interview you one gap at a time — uncovering hidden experience,
-                side projects, and skills that did not make it into your original resume.
-                Everything you share feeds directly into the ATS optimizer.
+            <CyberPanel style={{ borderLeft: `3px solid ${C.cyan}` }}>
+              <Lbl>▸ Next: Intelligence Interview</Lbl>
+              <p style={{ fontSize: 13, color: C.textMid, margin: "0 0 18px", lineHeight: 1.65, fontFamily: "Rajdhani, sans-serif" }}>
+                Before tailoring your resume, our AI will interview you one gap at a time — uncovering hidden experience, side projects, and skills that did not make it into your original resume.
               </p>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <Btn onClick={startChat} style={{ padding: "13px 32px" }}>▶ START INTERVIEW</Btn>
-                <Btn onClick={reset} outline style={{ padding: "13px 20px" }}>↺ NEW ANALYSIS</Btn>
+                <NeonBtn onClick={startChat}>▶ START INTERVIEW</NeonBtn>
+                <NeonBtn onClick={reset} outline>↺ NEW ANALYSIS</NeonBtn>
               </div>
-            </div>
+            </CyberPanel>
           </div>
         )}
 
-        {/* ══ CHAT ═══════════════════════════════════════════════════════ */}
+        {/* ══ CHAT ═════════════════════════════════════════════════════════════ */}
         {step === "chat" && (
-          <div style={{ animation: "fadeIn 0.4s ease" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 18, flexWrap: "wrap" }}>
-              <button onClick={() => setStep("results")} style={{ background: "transparent", border: "none", color: "#444", fontSize: 10, cursor: "pointer", fontFamily: "inherit", letterSpacing: "0.1em" }}>
-                ← BACK TO ANALYSIS
-              </button>
-              <div style={{ flex: 1, height: 1, background: "#1a1a24" }} />
-              <span style={{ fontSize: 10, color: "#ff6600", letterSpacing: "0.2em" }}>▸ INTELLIGENCE INTERVIEW</span>
+          <div style={{ animation: "cfFadeUp 0.4s ease" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 18 }}>
+              <button onClick={() => setStep("results")} style={{ background: "transparent", border: "none", fontFamily: "Orbitron, monospace", color: C.textMid, fontSize: 9, cursor: "pointer", letterSpacing: "0.1em" }}>← BACK</button>
+              <div style={{ flex: 1, height: 1, background: C.border }} />
+              <span style={{ fontFamily: "Orbitron, monospace", fontSize: 9, color: C.cyan, letterSpacing: "0.2em" }}>▸ INTELLIGENCE INTERVIEW</span>
             </div>
 
-            {/* Gaps reference bar */}
-            <Panel style={{ padding: 14, marginBottom: 16 }}>
-              <SectionLabel color="#ff4d4d">GAPS BEING PROBED IN THIS SESSION</SectionLabel>
+            <CyberPanel style={{ padding: 14, marginBottom: 14 }}>
+              <Lbl color={C.red}>Gaps being probed</Lbl>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
                 {[...(analysis?.gaps || []), ...(analysis?.missingSkills || [])].map((g, i) => (
-                  <Tag key={i} color="#ff4d4d">{g}</Tag>
+                  <CyberTag key={i} color={C.red}>{g}</CyberTag>
                 ))}
               </div>
-            </Panel>
+            </CyberPanel>
 
-            {/* Chat window */}
-            <div style={{
-              background: "#09090f", border: "1px solid #1a1a24",
-              borderTop: "2px solid #ff6600", height: 400,
-              overflowY: "auto", padding: 20
-            }}>
+            <div style={{ background: C.bg, border: `1px solid ${C.border}`, borderTop: `2px solid ${C.cyan}`, height: 400, overflowY: "auto", padding: 20 }}>
               {chatHistory.length === 0 && !chatLoading && (
-                <div style={{ textAlign: "center", padding: "60px 0", color: "#2a2a3a", fontSize: 12 }}>Starting interview...</div>
+                <div style={{ textAlign: "center", padding: "60px 0", fontFamily: "'Share Tech Mono', monospace", color: C.textDim, fontSize: 12 }}>
+                  INITIALIZING INTERVIEW SEQUENCE_
+                </div>
               )}
               {chatHistory.map((m, i) => <ChatBubble key={i} role={m.role} content={m.content} />)}
               {chatLoading && (
                 <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
-                  <div style={{ width: 28, height: 28, background: "#ff6600", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, color: "#000", fontWeight: 700 }}>AI</div>
-                  <div style={{ padding: "12px 16px", border: "1px solid #ff660025", borderLeft: "3px solid #ff6600", display: "flex", gap: 5, alignItems: "center" }}>
-                    {[0, 1, 2].map(i => <div key={i} style={{ width: 5, height: 5, background: "#ff6600", animation: `pulse 1s ${i * 0.2}s infinite` }} />)}
+                  <div style={{ width: 30, height: 30, background: C.cyan + "18", border: `1px solid ${C.cyan}44`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Orbitron, monospace", fontSize: 7, color: C.cyan }}>SYS</div>
+                  <div style={{ padding: "10px 16px", border: `1px solid ${C.cyan}20`, borderLeft: `3px solid ${C.cyan}`, display: "flex", gap: 5, alignItems: "center" }}>
+                    {[0, 1, 2].map(j => <div key={j} style={{ width: 5, height: 5, background: C.cyan, animation: `cfPulse 1s ${j * 0.2}s infinite` }} />)}
                   </div>
                 </div>
               )}
               <div ref={chatEndRef} />
             </div>
 
-            {/* Input bar or Done CTA */}
             {!chatDone ? (
               <div style={{ display: "flex" }}>
-                <input
-                  ref={inputRef} value={chatInput}
+                <input ref={inputRef} value={chatInput}
                   onChange={e => setChatInput(e.target.value)}
                   onKeyDown={e => e.key === "Enter" && !e.shiftKey && sendMessage()}
-                  placeholder="Type your response… (Enter to send)"
+                  placeholder="Type your response... (Enter to send)"
                   disabled={chatLoading}
-                  style={{
-                    flex: 1, padding: "15px 18px",
-                    background: "#0c0c17", border: "1px solid #1a1a24", borderTop: "none",
-                    color: "#ddd", fontFamily: "inherit", fontSize: 13,
-                    outline: "none", opacity: chatLoading ? 0.4 : 1
-                  }}
+                  style={{ flex: 1, padding: "14px 16px", background: C.bg, border: `1px solid ${C.border}`, borderTop: "none", color: C.text, fontFamily: "Rajdhani, sans-serif", fontSize: 14, outline: "none", opacity: chatLoading ? 0.4 : 1 }}
                 />
-                <button
-                  onClick={sendMessage} disabled={chatLoading || !chatInput.trim()}
-                  style={{
-                    background: chatLoading || !chatInput.trim() ? "#111" : "#ff6600",
-                    border: "none", padding: "0 24px", color: "#000",
-                    fontFamily: "inherit", fontSize: 11, fontWeight: 700,
-                    cursor: chatLoading || !chatInput.trim() ? "not-allowed" : "pointer",
-                    letterSpacing: "0.1em", transition: "background 0.2s"
-                  }}
-                >
+                <button onClick={sendMessage} disabled={chatLoading || !chatInput.trim()}
+                  style={{ background: chatLoading || !chatInput.trim() ? C.border : C.cyan, border: "none", padding: "0 24px", color: "#000", fontFamily: "Orbitron, monospace", fontSize: 10, fontWeight: 700, cursor: chatLoading || !chatInput.trim() ? "not-allowed" : "pointer", letterSpacing: "0.1em", transition: "background 0.2s" }}>
                   SEND →
                 </button>
               </div>
             ) : (
-              <div style={{
-                background: "#00e5a00d", border: "1px solid #00e5a033",
-                borderTop: "2px solid #00e5a0", padding: 20,
-                display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 14
-              }}>
+              <div style={{ background: C.green + "0d", border: `1px solid ${C.green}33`, borderTop: `2px solid ${C.green}`, padding: 20, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
                 <div>
-                  <div style={{ fontSize: 10, color: "#00e5a0", letterSpacing: "0.2em", marginBottom: 5 }}>✓ INTERVIEW COMPLETE</div>
-                  <div style={{ fontSize: 12, color: "#555" }}>All gaps explored. Ready to generate your ATS-optimized resume with all discovered context.</div>
+                  <div style={{ fontFamily: "Orbitron, monospace", fontSize: 9, color: C.green, letterSpacing: "0.2em", marginBottom: 5 }}>✓ INTERVIEW COMPLETE</div>
+                  <div style={{ fontFamily: "Rajdhani, sans-serif", fontSize: 13, color: C.textMid }}>All gaps explored. Ready to generate your ATS-optimized resume with all discovered context.</div>
                 </div>
-                <Btn onClick={tailorResume} color="#00e5a0" textColor="#000" style={{ padding: "13px 28px" }}>▶ GENERATE ATS RESUME</Btn>
+                <NeonBtn onClick={tailorResume} color={C.green} textColor="#000">▶ GENERATE ATS RESUME</NeonBtn>
               </div>
             )}
           </div>
         )}
 
-        {/* ══ TAILORING ══════════════════════════════════════════════════ */}
+        {/* ══ TAILORING ════════════════════════════════════════════════════════ */}
         {step === "tailoring" && (
           <div style={{ textAlign: "center", padding: "120px 0" }}>
-            <Spinner color="#00e5a0" />
-            <div style={{ color: "#00e5a0", fontSize: 11, letterSpacing: "0.3em", marginTop: 28 }}>GENERATING ATS-OPTIMIZED RESUME...</div>
-            <div style={{ color: "#2a2a3a", fontSize: 11, marginTop: 10 }}>Injecting keywords · Incorporating interview insights · Maximizing match score</div>
+            <Spin color={C.green} />
+            <div style={{ fontFamily: "Orbitron, monospace", color: C.green, fontSize: 11, letterSpacing: "0.3em", marginTop: 30 }}>GENERATING ATS-OPTIMIZED RESUME</div>
+            <div style={{ fontFamily: "'Share Tech Mono', monospace", color: C.textDim, fontSize: 11, marginTop: 10, animation: "cfBlink 1.4s infinite" }}>
+              INJECTING KEYWORDS · WEAVING INSIGHTS · MAXIMIZING MATCH SCORE_
+            </div>
           </div>
         )}
 
-        {/* ══ TAILORED ═══════════════════════════════════════════════════ */}
+        {/* ══ TAILORED ═════════════════════════════════════════════════════════ */}
         {step === "tailored" && tailoredResume && (
-          <div style={{ animation: "fadeIn 0.5s ease" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20, flexWrap: "wrap" }}>
-              <div style={{ padding: "7px 16px", background: "#00e5a010", border: "1px solid #00e5a044", color: "#00e5a0", fontSize: 10, letterSpacing: "0.18em" }}>
+          <div style={{ animation: "cfFadeUp 0.5s ease" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 18, flexWrap: "wrap" }}>
+              <div style={{ padding: "6px 14px", background: C.green + "12", border: `1px solid ${C.green}44`, fontFamily: "Orbitron, monospace", color: C.green, fontSize: 9, letterSpacing: "0.15em" }}>
                 ✓ ATS-OPTIMIZED RESUME READY
               </div>
-              <span style={{ fontSize: 11, color: "#444" }}>Keywords injected · Interview insights woven in · Score maximized</span>
+              <span style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: 11, color: C.textMid }}>Keywords injected · Interview insights woven in · Score maximized</span>
             </div>
 
-            {/* Stats */}
             <div style={{ display: "flex", gap: 14, marginBottom: 18, flexWrap: "wrap" }}>
               {[
                 { label: "ORIGINAL FIT SCORE", val: `${analysis.score}%`, color: scoreColor(analysis.score) },
-                { label: "TARGET ATS SCORE", val: "90%+", color: "#00e5a0" },
-                { label: "INTERVIEW ANSWERS", val: chatHistory.filter(m => m.role === "user").length, color: "#ff6600" }
+                { label: "TARGET ATS SCORE", val: "90%+", color: C.green },
+                { label: "INTERVIEW ANSWERS", val: chatHistory.filter(m => m.role === "user").length, color: C.cyan },
               ].map(({ label, val, color }) => (
-                <div key={label} style={{ background: "#0d0d16", border: "1px solid #1a1a24", padding: "12px 18px", flex: 1, minWidth: 120 }}>
-                  <div style={{ fontSize: 9, letterSpacing: "0.18em", color: "#333", marginBottom: 4 }}>{label}</div>
-                  <div style={{ fontSize: 20, fontWeight: 700, color }}>{val}</div>
+                <div key={label} style={{ background: C.panel, border: `1px solid ${C.border}`, padding: "12px 18px", flex: 1, minWidth: 120 }}>
+                  <div style={{ fontFamily: "Orbitron, monospace", fontSize: 8, letterSpacing: "0.18em", color: C.textMid, marginBottom: 4 }}>{label}</div>
+                  <div style={{ fontFamily: "Orbitron, monospace", fontSize: 22, fontWeight: 900, color }}>{val}</div>
                 </div>
               ))}
             </div>
 
-            <Panel style={{ borderTop: "2px solid #00e5a0", padding: 26, marginBottom: 18 }}>
-              <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: 12, lineHeight: 1.9, color: "#ccc", margin: 0 }}>
+            <CyberPanel accent={C.green} style={{ padding: 28, marginBottom: 18 }}>
+              <pre style={{ whiteSpace: "pre-wrap", fontFamily: "Rajdhani, sans-serif", fontSize: 13, lineHeight: 1.9, color: C.text, margin: 0 }}>
                 {tailoredResume}
               </pre>
-            </Panel>
+            </CyberPanel>
 
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <Btn onClick={copy} color="#00e5a0" textColor="#000" style={{ padding: "13px 28px" }}>
-                {copied ? "✓ COPIED!" : "⧉ COPY RESUME"}
-              </Btn>
-              <Btn onClick={downloadAsWord} color="#4da6ff" textColor="#000" style={{ padding: "13px 28px" }}>
-                ↓ DOWNLOAD AS WORD
-              </Btn>
-              <Btn onClick={() => setStep("chat")} outline color="#ff6600" style={{ padding: "13px 20px" }}>← BACK TO INTERVIEW</Btn>
-              <Btn onClick={reset} outline style={{ padding: "13px 20px" }}>↺ START OVER</Btn>
+              <NeonBtn onClick={copy} color={C.green} textColor="#000">{copied ? "✓ COPIED!" : "⧉ COPY RESUME"}</NeonBtn>
+              <NeonBtn onClick={downloadAsWord} color={C.cyan} textColor="#000">↓ DOWNLOAD AS WORD</NeonBtn>
+              <NeonBtn onClick={() => setStep("chat")} outline>← BACK TO INTERVIEW</NeonBtn>
+              <NeonBtn onClick={reset} outline>↺ START OVER</NeonBtn>
             </div>
           </div>
         )}
@@ -739,15 +728,34 @@ export default function App() {
       </main>
 
       <style>{`
-        @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
-        @keyframes spin { to { transform:rotate(360deg); } }
-        @keyframes pulse { 0%,100%{opacity:.2;transform:scale(.8)} 50%{opacity:1;transform:scale(1.2)} }
-        textarea::placeholder, input::placeholder { color: #1e1e2c; }
+        @keyframes cfSpin   { to { transform: rotate(360deg); } }
+        @keyframes cfBlink  { 0%,100%{opacity:1} 50%{opacity:0.25} }
+        @keyframes cfFadeUp { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:none} }
+        @keyframes cfPulse  { 0%,100%{opacity:.2;transform:scale(.8)} 50%{opacity:1;transform:scale(1.2)} }
+        @keyframes glitch1  {
+          0%,91%,100%{transform:none;opacity:0}
+          92%{transform:translateX(-4px);opacity:0.65}
+          94%{transform:translateX(4px);opacity:0.65}
+          96%{transform:none;opacity:0}
+        }
+        @keyframes glitch2  {
+          0%,93%,100%{transform:none;opacity:0}
+          94%{transform:translateX(3px);opacity:0.55}
+          96%{transform:translateX(-3px);opacity:0.55}
+          98%{transform:none;opacity:0}
+        }
+        .glitch-title { position:relative; display:inline-block; }
+        .glitch-title::before, .glitch-title::after {
+          content:attr(data-text); position:absolute; top:0; left:0; width:100%; height:100%;
+        }
+        .glitch-title::before { color:#e040fb; animation:glitch1 4s infinite; clip-path:inset(20% 0 58% 0); }
+        .glitch-title::after  { color:#00d4ff; animation:glitch2 4s infinite; clip-path:inset(58% 0 18% 0); }
+        textarea, input { caret-color:${C.cyan}; }
+        textarea::placeholder, input::placeholder { color:${C.textDim}; }
         ::-webkit-scrollbar { width:3px; height:3px; }
-        ::-webkit-scrollbar-track { background:#070710; }
-        ::-webkit-scrollbar-thumb { background:#ff660044; }
-        ::-webkit-scrollbar-thumb:hover { background:#ff6600; }
-        * { box-sizing:border-box; }
+        ::-webkit-scrollbar-track { background:${C.void}; }
+        ::-webkit-scrollbar-thumb { background:${C.cyan}44; }
+        ::-webkit-scrollbar-thumb:hover { background:${C.cyan}; }
       `}</style>
     </div>
   );
